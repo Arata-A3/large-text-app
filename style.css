@@ -1,0 +1,176 @@
+:root {
+    --bg-color: #121212;
+    --surface-color: #1e1e1e;
+    --primary-color: #bb86fc; /* モダンなパープルアクセント */
+    --on-primary: #000000;
+    --text-color: #e0e0e0;
+    --placeholder-color: #757575;
+    --display-bg-color: #000000;
+    --display-text-color: #ffffff;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body, html {
+    width: 100%;
+    height: 100%;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    overflow: hidden; /* 表示画面でのスクロール防止 */
+}
+
+/* 画面共通設定 */
+.screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    z-index: 1;
+}
+
+.screen.active {
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 10;
+}
+
+/* 入力画面スタイル */
+#input-screen {
+    padding: 2rem;
+    background: radial-gradient(circle at center, #2a2a2a 0%, #121212 100%);
+}
+
+.input-container {
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+    background: linear-gradient(90deg, #bb86fc, #9a67ea);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.subtitle {
+    text-align: center;
+    color: #aaaaaa;
+    font-size: 0.9rem;
+    margin-top: -1rem;
+    margin-bottom: 1rem;
+}
+
+textarea {
+    width: 100%;
+    padding: 1.25rem;
+    background-color: var(--surface-color);
+    border: 2px solid #333;
+    border-radius: 16px;
+    color: #ffffff;
+    font-size: 1.25rem;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+textarea:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 4px rgba(187, 134, 252, 0.2);
+}
+
+.primary-button {
+    background: var(--primary-color);
+    color: var(--on-primary);
+    border: none;
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    border-radius: 50px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: transform 0.1s, filter 0.2s;
+    box-shadow: 0 4px 15px rgba(187, 134, 252, 0.4);
+}
+
+.primary-button:active {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+}
+
+/* 表示画面スタイル */
+#display-screen {
+    background-color: var(--display-bg-color);
+    color: var(--display-text-color);
+    /* 画面回転しても常に全画面 */
+}
+
+#display-text {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-weight: 900;
+    line-height: 0.95;
+    white-space: pre-wrap;
+    word-break: break-all; /* 単語の途中でも改行して画面を埋める */
+    padding: 0;
+}
+
+.icon-button {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: white;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(5px);
+    transition: background 0.2s;
+    z-index: 20;
+}
+
+.icon-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* アニメーション */
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.screen.active {
+    animation: fadeIn 0.3s ease-out forwards;
+}
