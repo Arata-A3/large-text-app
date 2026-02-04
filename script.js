@@ -100,7 +100,7 @@ function adjustFontSize() {
     const sizeWrap = calculateMaxFontSize(availableWidth, availableHeight, false);
 
     // 判定ロジック：
-    // 改行なしのサイズが、改行ありのサイズの 40% 以上あれば、改行なしを採用する。
+    // 改行なしのサイズが、改行ありのサイズの 90% 以上あれば、改行なしを採用する。
     // （一行で表示できるなら、多少小さくても一行の方が綺麗に見えることが多いため）
     // ただし、ユーザーが明示的に改行コードを入力している場合はそれに従うため、
     // 入力テキストに改行が含まれているかは考慮済み（pre-wrapなら改行される）
@@ -108,7 +108,7 @@ function adjustFontSize() {
     // 入力テキスト自体に改行が含まれている場合の考慮
     const hasLineBreaks = textInput.value.includes('\n');
 
-    if (!hasLineBreaks && sizeNoWrap > sizeWrap * 0.4) {
+    if (!hasLineBreaks && sizeNoWrap > sizeWrap * 0.9) {
         // 改行なしを採用
         displayText.style.whiteSpace = 'nowrap';
         // word-breakはnowrap時は関係ないが念のため
