@@ -13,20 +13,10 @@ function init() {
     showButton.addEventListener('click', showText);
     closeButton.addEventListener('click', hideText);
 
-    // リサイズ時に文字サイズを再調整
+    // SVGの場合はリサイズ時のJS計算は不要（CSSとviewBoxで自動調整される）
+    // ただし、回転時に再描画が必要な場合のために監視は残す
     window.addEventListener('resize', () => {
-        if (displayScreen.classList.contains('active')) {
-            requestAnimationFrame(adjustFontSize);
-        }
-    });
-
-    // 画面回転時も調整
-    window.addEventListener('orientationchange', () => {
-        if (displayScreen.classList.contains('active')) {
-            // 回転直後はサイズが正しく取得できないことがあるため少し待つ
-            setTimeout(adjustFontSize, 100);
-            setTimeout(adjustFontSize, 500);
-        }
+        // 必要ならここで何かするが、SVGなら基本不要
     });
 }
 
@@ -35,14 +25,13 @@ async function showText() {
     const text = textInput.value.trim();
     if (!text) return;
 
-    // spanリセット等はadjustFontSizeで行うため、ここでは単純にテキストセット...はしない
-    // adjustFontSizeがテキストを入力から取得する仕様に変更したため、ここはクラス切り替えだけでOKだが
-    // 念のためテキストが存在することを確認済み
-
     inputScreen.classList.remove('active');
     displayScreen.classList.add('active');
 
-    // フルスクリーン化（ユーザーアクション起点）
+    // SVGで文字を描画する
+    renderTextAsSVG(text);
+
+    // フルスクリーン化
     try {
         if (document.documentElement.requestFullscreen) {
             await document.documentElement.requestFullscreen();
@@ -53,14 +42,74 @@ async function showText() {
         console.log('Fullscreen failed:', e);
     }
 
-    // 画面常時点灯 (Wake Lock)
+    // 画面常時点灯
     requestWakeLock();
+}
 
-    // 文字サイズ調整（念のため複数回実行して、キーボード閉鎖後のレイアウト変更に追従）
-    adjustFontSize();
-    setTimeout(adjustFontSize, 100);
-    setTimeout(adjustFontSize, 500);
-    setTimeout(adjustFontSize, 1000);
+// テキストをSVGとして描画する関数
+// これにより、JSでの複雑なフォントサイズ計算なしに、画面いっぱいに文字を表示できる
+function renderTextAsSVG(text) {
+    displayText.innerHTML = '';
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+
+    const textNode = document.createElementNS(svgNS, "text");
+    textNode.setAttribute("fill", "#ffffff");
+    textNode.setAttribute("text-anchor", "middle"); // 横方向の中央揃え
+    textNode.setAttribute("dominant-baseline", "central"); // 縦方向の中央揃え
+    textNode.setAttribute("font-weight", "900"); // 太字
+    // SVG内でのフォントサイズはviewBox計算用なので仮の値で良い
+    textNode.setAttribute("font-size", "100");
+
+    // 改行処理（単純な改行コードでの分割）
+    const lines = text.split('\n');
+
+    // 改行がない場合でも、文字数が多ければ自動折り返しをしたいが、
+    // SVGで自動折り返しは複雑。
+    // そのため、「短い単語は1行」「長い文章はユーザーが改行入れるか、簡易的に文字数で割る」アプローチにするか、
+    // あるいは「行数」だけはユーザー入力通りにするのが最も直感的。
+    // 今回は「ユーザー入力通り」を基本としつつ、
+    // 余りにも長い1行は画面からはみ出ることはないが（縮小されるため）、縦に細長くなる。
+    // それを防ぐための「自動改行ロジック」は、SVG化すると逆に難しくなるため、
+    // まずは「入力通り」で実装する。
+
+    lines.forEach((line, index) => {
+        const tspan = document.createElementNS(svgNS, "tspan");
+        tspan.textContent = line;
+        tspan.setAttribute("x", "0"); // 中央揃え(text-anchor=middleなので0が中心になるようviewBox調整する)
+
+        // 行間調整: 1行目は0、それ以降は行の高さ分ずらす
+        // font-size 100 に対して、行間 100〜120 くらい
+        tspan.setAttribute("dy", index === 0 ? "0" : "1.1em");
+
+        textNode.appendChild(tspan);
+    });
+
+    svg.appendChild(textNode);
+    displayText.appendChild(svg);
+
+    // レンダリング後にバウンディングボックスを取得してviewBoxを設定
+    // これが「画面いっぱいに表示」のキモ
+    requestAnimationFrame(() => {
+        try {
+            const bbox = textNode.getBBox();
+            // 少し余白を持たせる（文字が画面端にくっつきすぎないように）
+            const paddingX = bbox.width * 0.05; // 左右5%
+            const paddingY = bbox.height * 0.05; // 上下5%
+
+            const viewBoxX = bbox.x - paddingX;
+            const viewBoxY = bbox.y - paddingY;
+            const viewBoxW = bbox.width + paddingX * 2;
+            const viewBoxH = bbox.height + paddingY * 2;
+
+            svg.setAttribute("viewBox", `${viewBoxX} ${viewBoxY} ${viewBoxW} ${viewBoxH}`);
+        } catch (e) {
+            console.error("SVG BBox error:", e);
+        }
+    });
 }
 
 // 入力モードへ戻る
@@ -85,77 +134,7 @@ async function hideText() {
     releaseWakeLock();
 }
 
-// 文字サイズを画面に合わせて最大化するロジック
-function adjustFontSize() {
-    const containerWidth = window.innerWidth;
-    const containerHeight = window.innerHeight;
-
-    // パディングは極小に
-    const availableWidth = containerWidth;
-    const availableHeight = containerHeight;
-
-    // テキスト測定用のSpanを作成（既存のコンテンツを一旦クリアして再構築）
-    // これにより、コンテナ自体のサイズ制限に影響されずに純粋なテキストサイズを測れる
-    const text = textInput.value.trim();
-    // もし空なら何もしない
-    if (!text) return;
-
-    displayText.innerHTML = '';
-    const span = document.createElement('span');
-    span.textContent = text;
-    // 計測中レイアウトが崩れないようにとりあえずspan追加
-    displayText.appendChild(span);
-
-    // 1. 改行なし（nowrap）での最大サイズを計算
-    span.style.whiteSpace = 'nowrap';
-    const sizeNoWrap = calculateMaxFontSize(span, availableWidth, availableHeight);
-
-    // 2. 改行あり（pre-wrap + break-all）での最大サイズを計算
-    span.style.whiteSpace = 'pre-wrap';
-    span.style.wordBreak = 'break-all';
-    const sizeWrap = calculateMaxFontSize(span, availableWidth, availableHeight);
-
-    // 判定ロジック
-    // 改行なしのサイズが、改行ありのサイズの 90% 以上あれば、改行なしを採用する。
-    const hasLineBreaks = text.includes('\n');
-
-    if (!hasLineBreaks && sizeNoWrap > sizeWrap * 0.9) {
-        // 改行なしを採用
-        span.style.whiteSpace = 'nowrap';
-        span.style.fontSize = `${sizeNoWrap}px`;
-    } else {
-        // 改行ありを採用
-        span.style.whiteSpace = 'pre-wrap';
-        span.style.wordBreak = 'break-all';
-        span.style.fontSize = `${sizeWrap}px`;
-    }
-}
-
-// 指定された条件での最大フォントサイズを計算するヘルパー関数
-function calculateMaxFontSize(element, maxWidth, maxHeight) {
-    let low = 10;
-    let high = 5000;
-    let optimum = 10;
-
-    for (let i = 0; i < 20; i++) {
-        const mid = (low + high) / 2;
-        element.style.fontSize = `${mid}px`;
-
-        // getBoundingClientRect().width/height はより正確
-        const rect = element.getBoundingClientRect();
-
-        // 許容誤差を少し持たせる（<=）
-        if (rect.width <= maxWidth && rect.height <= maxHeight) {
-            optimum = mid;
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    return optimum;
-}
-
-// Wake Lock API (画面消灯防止)
+// Wake Lock API
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
@@ -163,7 +142,6 @@ async function requestWakeLock() {
             wakeLock.addEventListener('release', () => {
                 console.log('Wake Lock released');
             });
-            console.log('Wake Lock active');
         }
     } catch (err) {
         console.error(`${err.name}, ${err.message}`);
@@ -179,7 +157,6 @@ function releaseWakeLock() {
     }
 }
 
-// OSによってWake Lockが解除された場合（タブ切り替えなど）、再取得を試みる
 document.addEventListener('visibilitychange', async () => {
     if (wakeLock !== null && document.visibilityState === 'visible') {
         requestWakeLock();
