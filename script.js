@@ -35,7 +35,9 @@ async function showText() {
     const text = textInput.value.trim();
     if (!text) return;
 
-    displayText.textContent = text;
+    // spanリセット等はadjustFontSizeで行うため、ここでは単純にテキストセット...はしない
+    // adjustFontSizeがテキストを入力から取得する仕様に変更したため、ここはクラス切り替えだけでOKだが
+    // 念のためテキストが存在することを確認済み
 
     inputScreen.classList.remove('active');
     displayScreen.classList.add('active');
@@ -54,8 +56,11 @@ async function showText() {
     // 画面常時点灯 (Wake Lock)
     requestWakeLock();
 
-    // 文字サイズ調整
+    // 文字サイズ調整（念のため複数回実行して、キーボード閉鎖後のレイアウト変更に追従）
     adjustFontSize();
+    setTimeout(adjustFontSize, 100);
+    setTimeout(adjustFontSize, 500);
+    setTimeout(adjustFontSize, 1000);
 }
 
 // 入力モードへ戻る
@@ -81,7 +86,6 @@ async function hideText() {
 }
 
 // 文字サイズを画面に合わせて最大化するロジック
-// 文字サイズを画面に合わせて最大化するロジック
 function adjustFontSize() {
     const containerWidth = window.innerWidth;
     const containerHeight = window.innerHeight;
@@ -90,53 +94,58 @@ function adjustFontSize() {
     const availableWidth = containerWidth;
     const availableHeight = containerHeight;
 
+    // テキスト測定用のSpanを作成（既存のコンテンツを一旦クリアして再構築）
+    // これにより、コンテナ自体のサイズ制限に影響されずに純粋なテキストサイズを測れる
+    const text = textInput.value.trim();
+    // もし空なら何もしない
+    if (!text) return;
+
+    displayText.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = text;
+    // 計測中レイアウトが崩れないようにとりあえずspan追加
+    displayText.appendChild(span);
+
     // 1. 改行なし（nowrap）での最大サイズを計算
-    displayText.style.whiteSpace = 'nowrap';
-    const sizeNoWrap = calculateMaxFontSize(availableWidth, availableHeight, true);
+    span.style.whiteSpace = 'nowrap';
+    const sizeNoWrap = calculateMaxFontSize(span, availableWidth, availableHeight);
 
     // 2. 改行あり（pre-wrap + break-all）での最大サイズを計算
-    displayText.style.whiteSpace = 'pre-wrap';
-    displayText.style.wordBreak = 'break-all';
-    const sizeWrap = calculateMaxFontSize(availableWidth, availableHeight, false);
+    span.style.whiteSpace = 'pre-wrap';
+    span.style.wordBreak = 'break-all';
+    const sizeWrap = calculateMaxFontSize(span, availableWidth, availableHeight);
 
-    // 判定ロジック：
+    // 判定ロジック
     // 改行なしのサイズが、改行ありのサイズの 90% 以上あれば、改行なしを採用する。
-    // （一行で表示できるなら、多少小さくても一行の方が綺麗に見えることが多いため）
-    // ただし、ユーザーが明示的に改行コードを入力している場合はそれに従うため、
-    // 入力テキストに改行が含まれているかは考慮済み（pre-wrapなら改行される）
-
-    // 入力テキスト自体に改行が含まれている場合の考慮
-    const hasLineBreaks = textInput.value.includes('\n');
+    const hasLineBreaks = text.includes('\n');
 
     if (!hasLineBreaks && sizeNoWrap > sizeWrap * 0.9) {
         // 改行なしを採用
-        displayText.style.whiteSpace = 'nowrap';
-        // word-breakはnowrap時は関係ないが念のため
-        displayText.style.fontSize = `${sizeNoWrap}px`;
+        span.style.whiteSpace = 'nowrap';
+        span.style.fontSize = `${sizeNoWrap}px`;
     } else {
         // 改行ありを採用
-        displayText.style.whiteSpace = 'pre-wrap';
-        displayText.style.wordBreak = 'break-all';
-        displayText.style.fontSize = `${sizeWrap}px`;
+        span.style.whiteSpace = 'pre-wrap';
+        span.style.wordBreak = 'break-all';
+        span.style.fontSize = `${sizeWrap}px`;
     }
 }
 
 // 指定された条件での最大フォントサイズを計算するヘルパー関数
-function calculateMaxFontSize(maxWidth, maxHeight, isNoWrap) {
+function calculateMaxFontSize(element, maxWidth, maxHeight) {
     let low = 10;
     let high = 5000;
     let optimum = 10;
 
-    // 現在のスタイル設定（whiteSpaces等）のまま計算するので、
-    // 呼び出し元でスタイルをセットしてから呼ぶこと。
-
     for (let i = 0; i < 20; i++) {
         const mid = (low + high) / 2;
-        displayText.style.fontSize = `${mid}px`;
+        element.style.fontSize = `${mid}px`;
 
-        // scrollWidth/Height は内容の実際のサイズ
-        // わずかな誤差許容のため -1 しておくなどの調整も可
-        if (displayText.scrollWidth <= maxWidth && displayText.scrollHeight <= maxHeight) {
+        // getBoundingClientRect().width/height はより正確
+        const rect = element.getBoundingClientRect();
+
+        // 許容誤差を少し持たせる（<=）
+        if (rect.width <= maxWidth && rect.height <= maxHeight) {
             optimum = mid;
             low = mid;
         } else {
