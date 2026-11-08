@@ -33,7 +33,14 @@ const DEFAULT_SETTINGS = {
     vertical: false,
     mirror: false,
     speakOnShow: false,
+    // ブラウザで全画面 API を使うと終了方法の案内が必ず出るため、初期値はオフ
+    browserFullscreen: false,
 };
+
+// ホーム画面から起動したアプリとして動いているか（このときは最初から全画面）
+const isInstalledApp = () =>
+    matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches ||
+    navigator.standalone === true;
 
 const DEFAULT_FAVORITES = [
     'ありがとうございます',
@@ -965,12 +972,14 @@ function bindDisplayGestures() {
 
 async function enterFullscreen() {
     const root = document.documentElement;
-    try {
-        if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
-        else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
-        state.enteredFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
-    } catch {
-        state.enteredFullscreen = false; // iOS Safari など全画面非対応
+    state.enteredFullscreen = false;
+    // ホーム画面のアプリは最初から全画面なので不要。ブラウザでは設定がオンのときだけ
+    if (state.settings.browserFullscreen && !isInstalledApp()) {
+        try {
+            if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+            else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+            state.enteredFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+        } catch { /* iOS Safari など全画面非対応 */ }
     }
     const orient = state.settings.orient;
     if (orient !== 'auto' && screen.orientation && screen.orientation.lock) {
@@ -1032,6 +1041,8 @@ function init() {
     // 前回の入力を復元
     el.textInput.value = store.get('lastText', '');
 
+    // ホーム画面のアプリでは常に全画面なので、全画面の設定は出さない
+    document.getElementById('fullscreen-toggle').hidden = isInstalledApp();
     bindSettingsUI();
     bindLists();
     bindVoiceInput();

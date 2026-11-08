@@ -6,7 +6,7 @@
   "lang": "ja",
   "start_url": "./index.html",
   "scope": "./",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#121212",
   "theme_color": "#000000",
   "orientation": "any",

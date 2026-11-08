@@ -1,6 +1,6 @@
 // オフラインでも使えるようにするための Service Worker
 // アプリ本体を更新したら CACHE_VERSION を上げる
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const APP_CACHE = `large-text-app-${CACHE_VERSION}`;
 const FONT_CACHE = 'large-text-fonts';
 
