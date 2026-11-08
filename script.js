@@ -862,6 +862,7 @@ async function closeDisplay() {
     stopSpeaking();
     releaseWakeLock();
     await exitFullscreen();
+    if (pendingReload) { location.reload(); return; }
     renderLists();
     if (matchMedia('(pointer: fine)').matches) el.textInput.focus();
 }
@@ -1086,8 +1087,43 @@ function init() {
     }
 
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        // updateViaCache: 'none' … sw.js と、その中で読む version.js の更新確認でHTTPキャッシュを使わない
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
     }
+
+    // 起動時と、別アプリから戻ってきたときに新しい版がないか確認する
+    checkForUpdate();
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkForUpdate();
+    });
 }
+
+/* ---------- 自動更新 ---------- */
+
+async function checkForUpdate() {
+    if (!/^https?:$/.test(location.protocol) || !navigator.onLine) return;
+    try {
+        navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
+        const res = await fetch(`version.js?check=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const latest = (await res.text()).match(/APP_VERSION\s*=\s*'([^']+)'/)?.[1];
+        if (!latest || latest === self.APP_VERSION) return;
+
+        // 同じ版への再読み込みは1回だけ（何らかの理由で更新できなくても無限ループしない）
+        let tried = null;
+        try { tried = sessionStorage.getItem('reloadedFor'); } catch { /* 無視 */ }
+        if (tried === latest) return;
+        try { sessionStorage.setItem('reloadedFor', latest); } catch { /* 無視 */ }
+
+        if (state.displayActive) {
+            // 表示中は邪魔しない。入力画面に戻ったときに更新する
+            pendingReload = true;
+        } else {
+            location.reload();
+        }
+    } catch { /* オフラインなど */ }
+}
+
+let pendingReload = false;
 
 init();

@@ -54,9 +54,11 @@ self.addEventListener('fetch', (event) => {
     }
 
     // アプリ本体: ネット優先、つながらなければキャッシュ
+    // GitHub Pages は max-age=600 で配信するため、ブラウザのHTTPキャッシュを使うと
+    // 最大10分古い版が返ってしまう。no-cache で毎回サーバーに更新を確認する。
     if (url.origin === self.location.origin) {
         event.respondWith(
-            fetch(req)
+            fetch(req, { cache: 'no-cache' })
                 .then((res) => {
                     if (res.ok) {
                         const copy = res.clone();
