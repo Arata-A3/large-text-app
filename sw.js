@@ -1,7 +1,7 @@
 // オフラインでも使えるようにするための Service Worker
-// アプリ本体を更新したら CACHE_VERSION を上げる
-const CACHE_VERSION = 'v3';
-const APP_CACHE = `large-text-app-${CACHE_VERSION}`;
+// バージョンは version.js で管理（上げると古いキャッシュが入れ替わる）
+importScripts('version.js');
+const APP_CACHE = `large-text-app-${self.APP_VERSION}`;
 const FONT_CACHE = 'large-text-fonts';
 
 const APP_FILES = [
@@ -9,6 +9,7 @@ const APP_FILES = [
     './index.html',
     './style.css',
     './script.js',
+    './version.js',
     './manifest.json',
     './icon-192.png',
     './icon-512.png',

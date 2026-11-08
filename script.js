@@ -1041,6 +1041,8 @@ function init() {
     // 前回の入力を復元
     el.textInput.value = store.get('lastText', '');
 
+    document.getElementById('app-version').textContent = `v${self.APP_VERSION || '?'}`;
+
     // ホーム画面のアプリでは常に全画面なので、全画面の設定は出さない
     document.getElementById('fullscreen-toggle').hidden = isInstalledApp();
     bindSettingsUI();

@@ -484,6 +484,14 @@ textarea::placeholder {
     cursor: pointer;
 }
 
+.app-version {
+    text-align: center;
+    font-size: 0.7rem;
+    color: #5a5a5a;
+    letter-spacing: 0.05em;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 表示画面 ---------- */
 #display-screen {
     background: #000;
