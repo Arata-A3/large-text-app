@@ -61,10 +61,13 @@ const SWIPE_PX = 50;
  * 保存（localStorage は使えない環境もあるので必ず try/catch）
  * ======================================================= */
 
+// arata-a3.github.io 上の他のアプリと localStorage を共有するため、名前に接頭辞を付ける
+const STORE_PREFIX = 'largeText:';
+
 const store = {
     get(key, fallback) {
         try {
-            const v = localStorage.getItem(key);
+            const v = localStorage.getItem(STORE_PREFIX + key);
             return v === null ? fallback : JSON.parse(v);
         } catch {
             return fallback;
@@ -72,10 +75,31 @@ const store = {
     },
     set(key, value) {
         try {
-            localStorage.setItem(key, JSON.stringify(value));
+            localStorage.setItem(STORE_PREFIX + key, JSON.stringify(value));
         } catch { /* 保存できなくても動作は続ける */ }
     },
 };
+
+// 接頭辞なしで保存していた v1.2.4 以前のデータを引き継ぐ（1回だけ）。
+// 同じ名前を他のアプリが使っている可能性があるので、形が合うものだけ取り込み、元のデータは消さない。
+(function migrateOldStorage() {
+    try {
+        if (localStorage.getItem(STORE_PREFIX + 'migrated')) return;
+        const read = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+        const isStringArray = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string');
+        const settings = read('settings');
+        if (settings && typeof settings === 'object' && ('font' in settings || 'mode' in settings || 'preset' in settings)) {
+            store.set('settings', settings);
+        }
+        for (const k of ['favorites', 'history']) {
+            const v = read(k);
+            if (isStringArray(v)) store.set(k, v);
+        }
+        const lastText = read('lastText');
+        if (typeof lastText === 'string') store.set('lastText', lastText);
+        localStorage.setItem(STORE_PREFIX + 'migrated', '1');
+    } catch { /* 使えない環境では何もしない */ }
+})();
 
 const state = {
     settings: { ...DEFAULT_SETTINGS, ...store.get('settings', {}) },
@@ -1111,9 +1135,9 @@ async function checkForUpdate() {
 
         // 同じ版への再読み込みは1回だけ（何らかの理由で更新できなくても無限ループしない）
         let tried = null;
-        try { tried = sessionStorage.getItem('reloadedFor'); } catch { /* 無視 */ }
+        try { tried = sessionStorage.getItem(STORE_PREFIX + 'reloadedFor'); } catch { /* 無視 */ }
         if (tried === latest) return;
-        try { sessionStorage.setItem('reloadedFor', latest); } catch { /* 無視 */ }
+        try { sessionStorage.setItem(STORE_PREFIX + 'reloadedFor', latest); } catch { /* 無視 */ }
 
         if (state.displayActive) {
             // 表示中は邪魔しない。入力画面に戻ったときに更新する
