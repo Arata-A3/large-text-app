@@ -67,8 +67,8 @@
                     <span class="field-label">色</span>
                     <div id="color-presets" class="swatches"></div>
                     <div id="custom-colors" class="custom-colors" hidden>
-                        <label>文字 <input type="color" id="fg-color"></label>
-                        <label>背景 <input type="color" id="bg-color"></label>
+                        <button type="button" class="color-chip" data-target="fg"><span class="chip-dot"></span>文字の色</button>
+                        <button type="button" class="color-chip" data-target="bg"><span class="chip-dot"></span>背景の色</button>
                     </div>
                 </div>
 
@@ -155,6 +155,50 @@
         </div>
         <p id="display-hint" class="display-hint">ダブルタップで閉じる・左右スワイプで切り替え</p>
     </div>
+
+    <!-- 色選びパネル -->
+    <dialog id="color-dialog" class="color-dialog" aria-labelledby="cd-title">
+        <div class="cd-inner">
+            <div class="cd-head">
+                <h2 id="cd-title">文字の色</h2>
+                <button id="cd-close" class="cd-close" type="button" aria-label="閉じる">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div id="cd-preview" class="cd-preview"><span class="cd-preview-text">あ</span><span id="cd-hex" class="cd-hex"></span></div>
+
+            <section id="cd-recent-section" class="cd-section">
+                <h3>最近使った色</h3>
+                <div id="cd-recent" class="cd-swatches"></div>
+            </section>
+
+            <section class="cd-section">
+                <h3>ほかの項目と同じ色</h3>
+                <div id="cd-same" class="cd-same"></div>
+            </section>
+
+            <section class="cd-section">
+                <h3>テーマの色</h3>
+                <div id="cd-theme" class="cd-swatches"></div>
+            </section>
+
+            <section class="cd-section">
+                <h3>微調整</h3>
+                <div id="cd-adjust" class="cd-adjust"></div>
+            </section>
+
+            <section class="cd-section">
+                <h3>ほかの色</h3>
+                <label class="cd-picker-label"><input type="color" id="cd-picker"><span>色を選ぶ</span></label>
+            </section>
+
+            <div class="cd-actions">
+                <button id="cd-revert" class="cd-action" type="button">開いたときの色に戻す</button>
+                <button id="cd-reset" class="cd-action" type="button">プリセットの色に戻す</button>
+            </div>
+        </div>
+    </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
 

@@ -24,6 +24,7 @@ const COLOR_PRESETS = [
 
 const DEFAULT_SETTINGS = {
     preset: 'wb',
+    basePreset: 'wb', // カスタムにする前に選んでいたプリセット（「プリセットの色に戻す」で使う）
     fg: '#ffffff',
     bg: '#000000',
     font: 'gothic',
@@ -50,6 +51,7 @@ const DEFAULT_FAVORITES = [
 ];
 
 const HISTORY_LIMIT = 30;
+const RECENT_COLOR_LIMIT = 8;
 const LINE_HEIGHT = 1.15;   // 横書きの行送り（em）
 const COLUMN_GAP = 1.15;    // 縦書きの列送り（em）
 const PADDING_RATIO = 0.04; // 画面端の余白
@@ -101,8 +103,31 @@ const store = {
     } catch { /* 使えない環境では何もしない */ }
 })();
 
+// 色は #rrggbb の小文字にそろえる（形が違えば null）
+function normalizeHex(v) {
+    if (typeof v !== 'string') return null;
+    const m = v.trim().toLowerCase().match(/^#([0-9a-f]{6})$/);
+    return m ? `#${m[1]}` : null;
+}
+
+function loadSettings() {
+    const s = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) };
+    s.fg = normalizeHex(s.fg) ?? DEFAULT_SETTINGS.fg;
+    s.bg = normalizeHex(s.bg) ?? DEFAULT_SETTINGS.bg;
+    const isPreset = (id) => COLOR_PRESETS.some((p) => p.id === id);
+    if (!isPreset(s.basePreset)) s.basePreset = isPreset(s.preset) ? s.preset : DEFAULT_SETTINGS.basePreset;
+    return s;
+}
+
+function loadRecentColors() {
+    const list = store.get('recentColors', []);
+    if (!Array.isArray(list)) return [];
+    return [...new Set(list.map(normalizeHex).filter(Boolean))].slice(0, RECENT_COLOR_LIMIT);
+}
+
 const state = {
-    settings: { ...DEFAULT_SETTINGS, ...store.get('settings', {}) },
+    settings: loadSettings(),
+    recentColors: loadRecentColors(),
     favorites: store.get('favorites', null) ?? [...DEFAULT_FAVORITES],
     history: store.get('history', []),
     // 表示中の状態
@@ -132,8 +157,19 @@ const el = {
     previewStage: document.querySelector('#preview .stage'),
     colorPresets: $('color-presets'),
     customColors: $('custom-colors'),
-    fgColor: $('fg-color'),
-    bgColor: $('bg-color'),
+    colorDialog: $('color-dialog'),
+    cdTitle: $('cd-title'),
+    cdClose: $('cd-close'),
+    cdPreview: $('cd-preview'),
+    cdHex: $('cd-hex'),
+    cdRecentSection: $('cd-recent-section'),
+    cdRecent: $('cd-recent'),
+    cdSame: $('cd-same'),
+    cdTheme: $('cd-theme'),
+    cdAdjust: $('cd-adjust'),
+    cdPicker: $('cd-picker'),
+    cdRevert: $('cd-revert'),
+    cdReset: $('cd-reset'),
     speedField: $('speed-field'),
     favoritesList: $('favorites-list'),
     historyList: $('history-list'),
@@ -583,7 +619,7 @@ function buildColorPresets() {
             if (p.id === 'custom') {
                 state.settings.preset = 'custom';
             } else {
-                Object.assign(state.settings, { preset: p.id, fg: p.fg, bg: p.bg });
+                Object.assign(state.settings, { preset: p.id, basePreset: p.id, fg: p.fg, bg: p.bg });
             }
             saveSettings();
             syncSettingsUI();
@@ -603,8 +639,9 @@ function syncSettingsUI() {
     custom.style.color = s.fg;
     custom.style.backgroundColor = s.preset === 'custom' ? s.bg : '';
     el.customColors.hidden = s.preset !== 'custom';
-    el.fgColor.value = s.fg;
-    el.bgColor.value = s.bg;
+    for (const chip of el.customColors.querySelectorAll('.color-chip')) {
+        chip.querySelector('.chip-dot').style.backgroundColor = s[chip.dataset.target];
+    }
 
     for (const group of document.querySelectorAll('.segmented')) {
         const key = group.dataset.setting;
@@ -629,9 +666,368 @@ function bindSettingsUI() {
     for (const input of document.querySelectorAll('input[type=checkbox][data-setting]')) {
         input.addEventListener('change', () => setSetting(input.dataset.setting, input.checked));
     }
-    el.fgColor.addEventListener('input', () => setSetting('fg', el.fgColor.value));
-    el.bgColor.addEventListener('input', () => setSetting('bg', el.bgColor.value));
+    bindColorDialog();
     syncSettingsUI();
+}
+
+/* ---------- 色選びパネル ---------- */
+
+const COLOR_TARGETS = {
+    fg: { name: '文字', title: '文字の色' },
+    bg: { name: '背景', title: '背景の色' },
+};
+// テーマの色 = プリセットに出てくる色（重複は除く）
+const THEME_COLORS = [...new Set(COLOR_PRESETS.flatMap((p) => [p.fg, p.bg]))];
+
+const ADJUST_DEFS = [
+    { key: 'h', name: '色合い', max: 359, unit: '°', wrap: true },
+    { key: 's', name: '鮮やかさ', max: 100, unit: '%' },
+    { key: 'l', name: '明るさ', max: 100, unit: '%' },
+];
+
+const colorPanel = {
+    target: 'fg',
+    opened: null,   // 開いたときの { preset, fg, bg }
+    hsl: { h: 0, s: 0, l: 0 },
+    tuned: false,   // 微調整で色を変えたか（閉じたときに「最近使った色」に足す）
+    rows: {},
+};
+
+// スライダーで作った色と数値の組。開き直したときに数値が 1 ずれないようにする
+const hslMemo = new Map();
+
+function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    const to = (x) => Math.round(x * 255).toString(16).padStart(2, '0');
+    return `#${to(f(0))}${to(f(8))}${to(f(4))}`;
+}
+
+function hexToHslFloat(hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    let h = 0, s = 0;
+    if (d) {
+        s = d / (1 - Math.abs(2 * l - 1));
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+    }
+    return { h, s: s * 100, l: l * 100 };
+}
+
+// 色から整数の HSL を求める。戻すと同じ色になる整数の組を、計算値の近くから探す
+function hslFor(hex) {
+    if (hslMemo.has(hex)) return { ...hslMemo.get(hex) };
+    const f = hexToHslFloat(hex);
+    const clamp = (v, max) => Math.max(0, Math.min(max, v));
+    const search = (sFrom, sTo) => {
+        let best = null, bestDist = Infinity;
+        for (let dh = -2; dh <= 2; dh++) {
+            const h = (Math.round(f.h) + dh + 360) % 360;
+            for (let s = sFrom; s <= sTo; s++) {
+                for (let dl = -2; dl <= 2; dl++) {
+                    const l = Math.round(f.l) + dl;
+                    if (l < 0 || l > 100) continue;
+                    if (hslToHex(h, s, l) !== hex) continue;
+                    const hd = Math.min(Math.abs(h - f.h), 360 - Math.abs(h - f.h));
+                    const dist = hd * hd + (s - f.s) ** 2 + (l - f.l) ** 2;
+                    if (dist < bestDist) { best = { h, s, l }; bestDist = dist; }
+                }
+            }
+        }
+        return best;
+    };
+    const sr = Math.round(f.s);
+    // ほぼ黒・ほぼ白では鮮やかさが大きくずれるので、見つからなければ全体を探す
+    const found = search(clamp(sr - 2, 100), clamp(sr + 2, 100)) ?? search(0, 100);
+    return found ?? { h: Math.round(f.h) % 360, s: clamp(sr, 100), l: clamp(Math.round(f.l), 100) };
+}
+
+function addRecentColor(hex) {
+    state.recentColors = [hex, ...state.recentColors.filter((c) => c !== hex)].slice(0, RECENT_COLOR_LIMIT);
+    store.set('recentColors', state.recentColors);
+}
+
+function basePreset() {
+    return COLOR_PRESETS.find((p) => p.id === state.settings.basePreset) ?? COLOR_PRESETS[0];
+}
+
+// パネルで選んだ色を反映する。save が false のときは画面だけ変える（スライダーを動かしている間など）
+function applyPanelColor(hex, { save = true, fromAdjust = false } = {}) {
+    const s = state.settings;
+    s[colorPanel.target] = hex;
+    s.preset = 'custom';
+    if (!fromAdjust) colorPanel.hsl = hslFor(hex);
+    if (save) saveSettings();
+    syncSettingsUI();
+    updatePreview();
+    renderColorPanel();
+}
+
+function colorButton(hex, label, onPick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cd-swatch';
+    b.style.backgroundColor = hex;
+    b.dataset.color = hex;
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => onPick(hex));
+    return b;
+}
+
+function buildColorPanelLists() {
+    const s = state.settings;
+    const target = colorPanel.target;
+
+    el.cdRecentSection.hidden = state.recentColors.length === 0;
+    el.cdRecent.replaceChildren(...state.recentColors.map((c) => colorButton(c, `最近使った色 ${c}`, (hex) => {
+        addRecentColor(hex);
+        applyPanelColor(hex);
+        buildColorPanelLists();
+        renderColorPanel();
+    })));
+
+    // ほかの項目と同じ色: 色の点と項目の名前を並べる
+    const others = Object.keys(COLOR_TARGETS).filter((k) => k !== target);
+    el.cdSame.replaceChildren(...others.map((k) => {
+        const b = colorButton(s[k], `${COLOR_TARGETS[k].name}と同じ色 ${s[k]}`, (hex) => applyPanelColor(hex));
+        b.className = 'cd-same-item';
+        b.style.backgroundColor = '';
+        const dot = document.createElement('span');
+        dot.className = 'cd-dot';
+        dot.style.backgroundColor = s[k];
+        const name = document.createElement('span');
+        name.textContent = COLOR_TARGETS[k].name;
+        b.append(dot, name);
+        return b;
+    }));
+
+    el.cdTheme.replaceChildren(...THEME_COLORS.map((c) => colorButton(c, `テーマの色 ${c}`, (hex) => applyPanelColor(hex))));
+}
+
+function buildAdjustRows() {
+    const frag = document.createDocumentFragment();
+    for (const def of ADJUST_DEFS) {
+        const row = document.createElement('div');
+        row.className = 'cd-row';
+        row.innerHTML = `
+            <div class="cd-row-head">
+                <span class="cd-name">${def.name}</span>
+                <span class="cd-stepper">
+                    <button type="button" class="cd-step" data-delta="-1" aria-label="${def.name}を下げる">−</button>
+                    <span class="cd-num-wrap"><input type="text" class="cd-num" inputmode="numeric" aria-label="${def.name}（0〜${def.max}）"><span class="cd-unit">${def.unit}</span></span>
+                    <button type="button" class="cd-step" data-delta="1" aria-label="${def.name}を上げる">＋</button>
+                </span>
+            </div>
+            <div class="cd-slider"><input type="range" min="0" max="${def.max}" step="1" aria-label="${def.name}"></div>`;
+        const range = row.querySelector('input[type=range]');
+        const num = row.querySelector('.cd-num');
+
+        // スライダーの値から色を作る（色から読み直さない。灰色のとき色合いが 0 に飛ぶため）
+        const setValue = (v, save) => {
+            colorPanel.hsl[def.key] = v;
+            colorPanel.tuned = true;
+            const { h, s, l } = colorPanel.hsl;
+            const hex = hslToHex(h, s, l);
+            hslMemo.set(hex, { h, s, l });
+            applyPanelColor(hex, { save, fromAdjust: true });
+        };
+        const stepBy = (delta) => {
+            let v = colorPanel.hsl[def.key] + delta;
+            v = def.wrap ? (v + def.max + 1) % (def.max + 1) : Math.max(0, Math.min(def.max, v));
+            setValue(v, true);
+        };
+
+        range.addEventListener('input', () => setValue(Number(range.value), false));
+        range.addEventListener('change', () => setValue(Number(range.value), true));
+
+        num.addEventListener('focus', () => num.select());
+        num.addEventListener('input', () => {
+            const t = num.value.trim();
+            if (!/^\d+$/.test(t)) return;
+            const v = Number(t);
+            if (v <= def.max) setValue(v, false);
+        });
+        const commitNum = () => {
+            const v = parseInt(num.value, 10);
+            const fixed = Number.isNaN(v) ? colorPanel.hsl[def.key] : Math.max(0, Math.min(def.max, v));
+            num.value = String(fixed);
+            setValue(fixed, true);
+        };
+        num.addEventListener('change', commitNum);
+        num.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commitNum(); num.select(); }
+        });
+
+        for (const b of row.querySelectorAll('.cd-step')) bindRepeatButton(b, () => stepBy(Number(b.dataset.delta)));
+
+        colorPanel.rows[def.key] = { range, num, slider: row.querySelector('.cd-slider') };
+        frag.appendChild(row);
+    }
+    el.cdAdjust.replaceChildren(frag);
+}
+
+// 押すと 1 回、長押しで続けて動く − / ＋
+function bindRepeatButton(button, action) {
+    let delayTimer = null, repeatTimer = null, fromPointer = false;
+    const stop = () => {
+        clearTimeout(delayTimer);
+        clearInterval(repeatTimer);
+        delayTimer = repeatTimer = null;
+    };
+    button.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        fromPointer = true;
+        action();
+        delayTimer = setTimeout(() => { repeatTimer = setInterval(action, 60); }, 400);
+    });
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel']) button.addEventListener(type, stop);
+    button.addEventListener('contextmenu', (e) => e.preventDefault());
+    // キーボード（Enter・Space）で押されたとき
+    button.addEventListener('click', () => {
+        if (fromPointer) { fromPointer = false; return; }
+        action();
+    });
+}
+
+function renderColorPanel() {
+    if (!el.colorDialog.open) return;
+    const s = state.settings;
+    const target = colorPanel.target;
+    const hex = s[target];
+    const { h, s: sat, l } = colorPanel.hsl;
+
+    el.cdPreview.style.color = s.fg;
+    el.cdPreview.style.backgroundColor = s.bg;
+    el.cdHex.textContent = hex;
+
+    // 選ばれている色に印（プリセットのままのときはどれにも付けない）
+    const chosen = s.preset === 'custom' ? hex : null;
+    for (const b of el.colorDialog.querySelectorAll('[data-color]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.color === chosen));
+    }
+    el.cdPicker.value = hex;
+
+    const vals = { h, s: sat, l };
+    const tracks = {
+        h: `linear-gradient(to right, ${[0, 60, 120, 180, 240, 300, 360].map((x) => `hsl(${x}, ${sat}%, ${l}%)`).join(', ')})`,
+        s: `linear-gradient(to right, hsl(${h}, 0%, ${l}%), hsl(${h}, 100%, ${l}%))`,
+        l: `linear-gradient(to right, hsl(${h}, ${sat}%, 0%), hsl(${h}, ${sat}%, 50%), hsl(${h}, ${sat}%, 100%))`,
+    };
+    for (const def of ADJUST_DEFS) {
+        const row = colorPanel.rows[def.key];
+        row.range.value = String(vals[def.key]);
+        // 入力中の欄は書き換えない
+        if (document.activeElement !== row.num) row.num.value = String(vals[def.key]);
+        row.slider.style.setProperty('--track', tracks[def.key]);
+        row.slider.style.setProperty('--cur', hex);
+    }
+
+    const o = colorPanel.opened;
+    el.cdRevert.disabled = o.preset === s.preset && o.fg === s.fg && o.bg === s.bg;
+    const base = basePreset();
+    el.cdReset.textContent = `プリセット（${base.name}）の色に戻す`;
+    el.cdReset.disabled = hex === base[target];
+}
+
+function openColorPanel(target) {
+    const s = state.settings;
+    // <dialog> の無い古いブラウザでは、端末の色選びを直接開く
+    if (typeof el.colorDialog.showModal !== 'function') {
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.value = s[target];
+        input.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0;';
+        document.body.appendChild(input);
+        input.addEventListener('input', () => {
+            const hex = normalizeHex(input.value);
+            if (hex) setSetting(target, hex);
+        });
+        input.addEventListener('change', () => {
+            const hex = normalizeHex(input.value);
+            if (hex) addRecentColor(hex);
+            input.remove();
+        });
+        input.click();
+        return;
+    }
+    colorPanel.target = target;
+    colorPanel.opened = { preset: s.preset, fg: s.fg, bg: s.bg };
+    colorPanel.hsl = hslFor(s[target]);
+    colorPanel.tuned = false;
+    el.cdTitle.textContent = COLOR_TARGETS[target].title;
+    el.colorDialog.showModal();
+    buildColorPanelLists();
+    renderColorPanel();
+}
+
+function refreshAfterPanelChange() {
+    saveSettings();
+    syncSettingsUI();
+    updatePreview();
+    buildColorPanelLists();
+    renderColorPanel();
+}
+
+function bindColorDialog() {
+    buildAdjustRows();
+    for (const chip of el.customColors.querySelectorAll('.color-chip')) {
+        chip.addEventListener('click', () => openColorPanel(chip.dataset.target));
+    }
+    el.cdClose.addEventListener('click', () => el.colorDialog.close());
+    // 外側（暗い部分）を押したら閉じる
+    el.colorDialog.addEventListener('click', (e) => {
+        if (e.target === el.colorDialog) el.colorDialog.close();
+    });
+    // Esc・閉じるボタン・外側のどれで閉じても通る
+    el.colorDialog.addEventListener('close', () => {
+        const hex = state.settings[colorPanel.target];
+        if (colorPanel.tuned && hex !== colorPanel.opened?.[colorPanel.target]) addRecentColor(hex);
+        colorPanel.tuned = false;
+        saveSettings();
+    });
+
+    el.cdPicker.addEventListener('input', () => {
+        const hex = normalizeHex(el.cdPicker.value);
+        if (hex) applyPanelColor(hex, { save: false });
+    });
+    el.cdPicker.addEventListener('change', () => {
+        const hex = normalizeHex(el.cdPicker.value);
+        if (!hex) return;
+        addRecentColor(hex);
+        applyPanelColor(hex);
+        buildColorPanelLists();
+        renderColorPanel();
+    });
+
+    el.cdRevert.addEventListener('click', () => {
+        const o = colorPanel.opened;
+        Object.assign(state.settings, { preset: o.preset, fg: o.fg, bg: o.bg });
+        colorPanel.hsl = hslFor(o[colorPanel.target]);
+        colorPanel.tuned = false;
+        refreshAfterPanelChange();
+    });
+
+    el.cdReset.addEventListener('click', () => {
+        const base = basePreset();
+        const s = state.settings;
+        s[colorPanel.target] = base[colorPanel.target];
+        colorPanel.hsl = hslFor(s[colorPanel.target]);
+        colorPanel.tuned = false;
+        // 文字も背景もプリセットと同じになったら、そのプリセットを選んだ状態に戻す
+        if (s.fg === base.fg && s.bg === base.bg) s.preset = base.id;
+        refreshAfterPanelChange();
+    });
 }
 
 /* ---------- お気に入り・履歴 ---------- */
